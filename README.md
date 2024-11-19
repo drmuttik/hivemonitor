@@ -1,5 +1,6 @@
 # hivemonitor
-!["Sensor in a frame"](sensor-frame-front.jpeg)
+
+<img src="sensor-frame-front.jpeg" alt="Sensor in a frame" width="600px" height="800px">
 
 ## Steps and code to build a temperature and humidity monitoring system with SwitchBot sensors.
 
