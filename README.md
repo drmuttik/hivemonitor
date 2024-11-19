@@ -11,6 +11,7 @@ Steps listed in the introduction include:
   - building frames for sensors (a DIY job)
   - fitting frames with sensors into your hive(s)
   - installing SwitchBot app
+    Important: _When an app asks if sensor data should be stored in the cloud say "Yes". It will be needed for automating the system._
   - connecting the "mini-hub" to Wifi and to the Internet (follow instructions which come with the hub)
   - establishing communication between the app and the sensors (follow instructions which come with the sensors)
   - verifying the graphs in the app work well (you can give hives individual names).
