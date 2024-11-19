@@ -1,12 +1,12 @@
+//obtain this from "Developer options" in switchbot app
 const token = 'your token here';
+
+//only devices with a string 'hive' in the name will generate Email alerts when temperature or humidity is outside of acceptable range
 const email = 'your gmail here';
 
 // Define acceptable ranges
 const TEMP_RANGE = { min: 10, max: 32 }; //side frame with the sensor is well ouside of the bees' cluster so can be pretty cool
 const HUMIDITY_RANGE = { min: 50, max: 75 };
-
-//only devices with a string 'hive' in the name will generate Email alerts when temperature or humidity is outside of acceptable range
-const devices = ['Left hive', 'Right hive', 'NUC hive', 'Garage', 'Lab', 'Conservatory'];
 
 /////////////////////////////////////////////////////////////////////////////////////////
 const API_TOKEN = token;
