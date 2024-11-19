@@ -16,12 +16,13 @@ Steps listed in the introduction include:
 When you are in a position that the app shows and updates the graphs you will be able to take the next step and automate the system. Why not? It is free anyway!
 
 Steps required:
-  - use your Google account (create one if necessary), go to https://docs.google.com/spreadsheets and create a sheet
+  - use your Google account (create one if necessary), go to https://docs.google.com/spreadsheets and create a sheet called 'SensorsData'
   - go into your SwitchBot app, then into Profile/Preferences/About/Developer Options
   - get a token string (you will not need a Secret Key)
   - in Google Sheet select "Extensions"/"Apps script" and paste there the script code from hivemonitor.as
   - edit the top of the script and insert your token into this line: const token = 'insert your token here';
   - edit the script to insert your Email (daily reports will be sent there) - it works best with gmail (which expands graphs so you can see them instantly)
+    Note: only devices with a "hive" in their name (as given in the app) will be generating alerts about extreme temperature and humidity
   - edit the script to adjust the critical levels of temperature and humidity
   - save the script (an icon at the top which looks like a small floppy disk; if you know what it looks like :-)
   - press the Triggers icon on the left side (it looks like an alarm clock)
