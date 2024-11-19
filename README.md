@@ -1,5 +1,5 @@
 # hivemonitor
-![""](sensor_frame_front.jpg)
+!["Sensor in a frame"](sensor-frame-front.jpg)
 
 ## Steps and code to build a temperature and humidity monitoring system with SwitchBot sensors.
 
