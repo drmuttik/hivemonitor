@@ -41,6 +41,7 @@ When you set it up so that the app shows and updates the graphs you will be able
     - create a trigger to run createDailyCharts() once a day (I set it to just after midnight so that graphs reflect 24h of the last day)
   - to test how the script works you can manually use "Run" icon at the top while selecting either logSensorData() or createDailyCharts() to the right of the "Run" icon
     (if any error occurs it will be reported at the bottom).
+    <br><ins>**Note**: Sending Emails from a script is considered an unsafe operation (due to spam risks) - you will need to explicitly allow it when Google Sheets ask.</ins>
 
 If you need help, find any bug, have any comments or ideas, please Email me - you can find the address at the bottom of ["hivemonitor.pdf"](hivemonitor.pdf).
 
