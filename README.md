@@ -27,20 +27,23 @@ before automation is added.
 When you set it up so that the app shows and updates the graphs you will be able to take the next step and automate the system. Why not? It is free anyway!
 
 ### Steps required for automatic alerting and daily Email reports:
-  - use your Google account (create one if necessary), go to https://docs.google.com/spreadsheets and create a sheet called 'SensorsData'
+  - use your Google account (create one if necessary), go to https://docs.google.com/spreadsheets and create a sheet
   - go into your SwitchBot app, then into Profile/Preferences/About/Developer Options
-  - get a token string (you will not need a Secret Key)
+  - get a token string (it also shows a Secret Key - you will not need it)
   - in Google Sheet select "Extensions"/"Apps script" and paste there the script code from ["hivemonitor.as"](hivemonitor.as) file
   - edit the top of the script and insert your token into this line: const token = 'your token here';
   - edit the script to insert your Email (daily reports will be sent there) - it works best with gmail (which expands attached graphs so you can see them instantly)
-    <br><ins>**Note**: Only devices with a "hive" in their name (as given in the app) will be generating alerts about extreme temperature and humidity.</ins>
+    <br><ins>**Note**: Only devices with a "hive" in their name (as given in the app) will be generating alerts about extreme temperature and humidity.<br>
+    To give any device a descriptive names which includes "hive" string, go into the settings of your device in SwitchBot app.</ins>
   - edit the script to adjust the critical levels of temperature and humidity
   - save the script (an icon at the top which looks like a small floppy disk; if you know what it looks like :-)
   - press the Triggers icon on the left side (it looks like an alarm clock)
-    - create a trigger to run logSensorData() every 30 min (or every hour - this may allow sensors' batteries to run a bit longer)
+    - create a trigger to run logSensorData() every 1 hour (or even every 2 hours - this may allow sensors' batteries to run a bit longer)
+    <br><ins>**Note:** Blue button [+  Add trigger ] is in a bit of an unexpected position in the bottom right corner of the screen.</ins>
     - create a trigger to run createDailyCharts() once a day (I set it to just after midnight so that graphs reflect 24h of the last day)
   - to test how the script works you can manually use "Run" icon at the top while selecting either logSensorData() or createDailyCharts() to the right of the "Run" icon
-    (if any error occurs it will be reported at the bottom).
+    <br><ins>**Hint:** Initially use "Run" with logSensorData() several times with a few minutes interval because you need some data records to produce charts.
+    (If any error occurs it will be reported at the bottom.)</ins>
     <br><ins>**Note**: Sending Emails from a script is considered an unsafe operation (due to spam risks) - you will need to explicitly allow it when Google Sheets ask.</ins>
 
 If you need help, find any bug, have any comments or ideas, please Email me - you can find the address at the bottom of ["hivemonitor.pdf"](hivemonitor.pdf).
