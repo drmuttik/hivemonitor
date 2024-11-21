@@ -8,8 +8,8 @@ Introduction is in ["hivemonitor.pdf"](hivemonitor.pdf) - it describes the compo
 (with Amazon links valid in Nov 2024) and how sensors can be fitted into a hive. 
 
 It is possible to run the system without a hub by directly receiving Bluetooth data on your smartphone. It works but, apart from not being able to automate
-the system, you would lose an ability to monitor the hives' when you travel. I found that a statonary hub located closer to the hives is pretty useful even
-before automation is added.
+the system, you would lose an ability to monitor the hives' when you are not in the vicinity. I found that a statonary hub located closer to the hives is 
+pretty useful even before automation is added.
 
 ### Steps listed in the ["hivemonitor.pdf"](hivemonitor.pdf) include:
   - procuring sensors and a "mini-hub" (directly from switch-bot.com or via Amazon)
@@ -33,8 +33,8 @@ When you set it up so that the app shows and updates the graphs you will be able
   - in Google Sheet select "Extensions"/"Apps script" and paste there the script code from ["hivemonitor.as"](hivemonitor.as) file
   - edit the top of the script and insert your token into this line: const token = 'your token here';
   - edit the script to insert your Email (daily reports will be sent there) - it works best with gmail (which expands attached graphs so you can see them instantly)
-    <br><ins>**Note**: Only devices with a "hive" in their name (as given in the app) will be generating alerts about extreme temperature and humidity.<br>
-    To give any device a descriptive names which includes "hive" string, go into the settings of your device in SwitchBot app.</ins>
+    <br><ins>**Note**: Only devices with a "hive" in their name (as given in the app) will be included into charts and will generate alerts about extreme temperature and humidity.
+    To give any device a descriptive name which includes "hive" string, go into the settings of each device in SwitchBot app.</ins>
   - edit the script to adjust the critical levels of temperature and humidity
   - save the script (an icon at the top which looks like a small floppy disk; if you know what it looks like :-)
   - press the Triggers icon on the left side (it looks like an alarm clock)
