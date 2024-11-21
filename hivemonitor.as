@@ -8,32 +8,117 @@ const email = 'your gmail here';
 const TEMP_RANGE = { min: 10, max: 32 }; //side frame with the sensor is well ouside of the bees' cluster so can be pretty cool
 const HUMIDITY_RANGE = { min: 50, max: 75 };
 
-/////////////////////////////////////////////////////////////////////////////////////////
-const API_TOKEN = token;
+// Define one sensor measuring temperature outside (name)
+const OUTSIDE_SENSOR="Porch";
+
+// Set to true to include the outside humidity in the humidity chart (to exclude - set to false)
+const PLOT_OUTSIDE_HUMIDITY = true;
+
+// Maximum number of email alerts per day
+const MAX_EMAIL_ALERTS_PER_DAY = 5;
+
+///////////////////////////////////////////////////////////////////////////////////////
+
+// Global variable to track email count and date
+let emailCount = 0;
+let lastEmailResetDate = '';
 
 function logSensorData() {
-    const url = 'https://api.switch-bot.com/v1.0/devices'; // URL to fetch device list (we use API 1.0; API 2.0 is problematic)
-    const headers = {
-        "Authorization": API_TOKEN,
-        "Content-Type": "application/json"
-    };
-
-    const response = UrlFetchApp.fetch(url, {
+  const url = 'https://api.switch-bot.com/v1.0/devices';
+  const headers = {
+    "Authorization": token,
+    "Content-Type": "application/json"
+  };
+  
+  let response;
+  for (let attempt = 1; attempt <= 10; attempt++) { //10 retries
+    try {
+      response = UrlFetchApp.fetch(url, {
         method: "GET",
         headers: headers
-    });
+      });
+      break; // Exit the loop if successful
+    } catch (error) {
+      if (attempt < 10 ) {
+        Utilities.sleep(60000); // Wait time in milliseconds
+      } else {
+        console.error("Max retries reached. Exiting.");
+      }
+    }
+  }
 
     const deviceList = JSON.parse(response.getContentText()).body.deviceList;
 
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+
+    // Reset email count at midnight
+    const todayDate = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    if (lastEmailResetDate !== todayDate) {
+        emailCount = 0;
+        lastEmailResetDate = todayDate;
+    }
+
+    // Prepare header row, excluding "Hub Mini" devices
+    const headerRow = ["Timestamp"];
+    const deviceIdMap = {}; // Map to track device IDs for correct column placement
+
+    const filteredDeviceList = deviceList.filter(device => {
+        const deviceName = device.deviceName || '';
+        if (deviceName.trim() !== '' && !deviceName.toLowerCase().includes("hub mini")) {
+            headerRow.push(device.deviceName);
+            deviceIdMap[device.deviceId] = headerRow.length - 1; // Map device ID to column index
+            return true;
+        }
+        return false;
+    });
+
+    //check if there is at least one device with "hive" in the name (commented out to allow people not assigning any names)
+    //const hasHive = filteredDeviceList.some(device => device.deviceName.toLowerCase().includes("hive"));
+    //if (!hasHive) {
+    //  throw new Error('No hives found.');
+    //}
+
+    // Check if column A is unpainted ("none") - this ensures the following block is executed once (like an initialization function)
+    const columnAFirstCell = sheet.getRange(1, 1);
+    const columnAFirstCellBackground = columnAFirstCell.getBackground();
+    if (columnAFirstCellBackground === "none" || columnAFirstCellBackground === "#ffffff") {
+      // Paint first column light green
+      const columnARange = sheet.getRange(1, 1, sheet.getMaxRows(), 1);
+      columnARange.setBackground('lightgreen');
+
+      // Paint even columns (2, 4, ...) lighter grey, only if they contain data
+      for (let col = 2; col <= headerRow.length; col += 2) {
+        const columnRange = sheet.getRange(1, col, sheet.getMaxRows(), 1);
+        const columnValues = columnRange.getValues();
+
+        // Check if there is data in the column
+        const hasData = columnValues.some(row => row[0] !== "" && row[0] !== null);
+
+        if (hasData) {
+          columnRange.setBackground('#E8E8E8'); // Lighter grey
+        }
+      }
+
+      // Paint header row yellow and assign comments
+      const headerRange = sheet.getRange(1, 1, 1, headerRow.length);
+      headerRange.setValues([headerRow])
+          .setFontWeight('bold')
+          .setFontSize(headerRange.getFontSize() + 1)
+          .setBackground('yellow');
+
+      // Add device IDs as comments in the header row
+      Object.keys(deviceIdMap).forEach(deviceId => {
+        const columnIndex = deviceIdMap[deviceId] + 1;
+        sheet.getRange(1, columnIndex).setComment(`Device ID: ${deviceId}`);
+      });
+    }
+
     // Prepare to log data
     const deviceData = {};
-    
-    deviceList.forEach(device => {
+    filteredDeviceList.forEach(device => {
         if (device.enableCloudService) {
             const deviceId = device.deviceId;
-            const deviceName = device.deviceName;
-
-            const statusUrl = 'https://api.switch-bot.com/v1.0/devices/${deviceId}/status';
+            const statusUrl = `https://api.switch-bot.com/v1.0/devices/${deviceId}/status`;
             const statusResponse = UrlFetchApp.fetch(statusUrl, {
                 method: "GET",
                 headers: headers
@@ -41,147 +126,168 @@ function logSensorData() {
             const statusData = JSON.parse(statusResponse.getContentText()).body;
 
             // Collect temperature and humidity
-            deviceData[deviceName] = {
-                temperature: statusData.temperature || 'N/A',
+            deviceData[deviceId] = {
+                temperature: statusData.temperature || N/A, 
                 humidity: statusData.humidity || 'N/A'
             };
         }
     });
 
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('SensorsData');
-        
+    // Add timestamp and device data to the sheet
     const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd-MMM-yyyy HH:mm');
-    let rowData = [timestamp];
-    let outOfRange = false;  // Flag to check if any data is out of range
-    let outOfRangeDetails = []; // Array to store out-of-range details for email
-    
-    devices.forEach((deviceName, index) => {
-        const data = deviceData[deviceName] || { temperature: 'N/A', humidity: 'N/A' };
-        const temperature = parseFloat(data.temperature);
-        const humidity = parseFloat(data.humidity);
-        rowData.push(`${temperature.toFixed(1)}C ${humidity}%`);
+    let rowData = Array(headerRow.length).fill(''); // Initialize row with empty values
+    rowData[0] = timestamp; // Set timestamp in column A
 
-        // Only apply out-of-range checks for devices with "hive" in the name
-        if (deviceName.toLowerCase().includes("hive")) {
-            // Check if temperature or humidity is out of the specified range
-            if ((temperature < TEMP_RANGE.min || temperature > TEMP_RANGE.max) || (humidity < HUMIDITY_RANGE.min || humidity > HUMIDITY_RANGE.max)) {
-                outOfRange = true; // Set the flag if either value is out of range
+    let outOfRangeDetails = []; // Store details for out-of-range alerts
 
-                // Highlight the current cell (index + 2 because column A is timestamp)
-                const cell = sheet.getRange(sheet.getLastRow() + 1, index + 2); // Next row, device column (B, C, D, etc.)
-                cell.setBackground('pink');
+    Object.keys(deviceData).forEach(deviceId => {
+        const columnIndex = deviceIdMap[deviceId];
+        if (columnIndex !== undefined) {
+            const data = deviceData[deviceId];
+            const temperature = parseFloat(data.temperature);
+            const humidity = parseFloat(data.humidity);
+            // Replace NaN with default values
+            if (isNaN(temperature)) temperature = 0;
+            if (isNaN(humidity)) humidity = 0;
+            rowData[columnIndex] = `${temperature.toFixed(1)}C ${humidity}%`;
 
-                // Collect details of out-of-range events for email
-                if (temperature < TEMP_RANGE.min || temperature > TEMP_RANGE.max) {
-                    outOfRangeDetails.push(`${deviceName} - Temperature: ${temperature.toFixed(1)}C (out of range ${TEMP_RANGE.min}C-${TEMP_RANGE.max}C)`);
-                }
-                if (humidity < HUMIDITY_RANGE.min || humidity > HUMIDITY_RANGE.max) {
-                    outOfRangeDetails.push(`${deviceName} - Humidity: ${humidity}% (out of range ${HUMIDITY_RANGE.min}%-${HUMIDITY_RANGE.max}%)`);
+            // Check for out-of-range values only for devices with "hive" in the name
+            const deviceName = headerRow[columnIndex];
+            if (deviceName.toLowerCase().includes("hive")) {
+                if ((temperature < TEMP_RANGE.min || temperature > TEMP_RANGE.max) || 
+                    (humidity < HUMIDITY_RANGE.min || humidity > HUMIDITY_RANGE.max)) {
+                    // Highlight the cell
+                    const cell = sheet.getRange(sheet.getLastRow() + 1, columnIndex + 1); // Next row, respective column
+                    cell.setBackground('pink');
+
+                    // Add details to the out-of-range list
+                    if (temperature < TEMP_RANGE.min || temperature > TEMP_RANGE.max) {
+                        outOfRangeDetails.push(`${deviceName} - Temperature: ${temperature.toFixed(1)}C (Range: ${TEMP_RANGE.min}-${TEMP_RANGE.max}C)`);
+                    }
+                    if (humidity < HUMIDITY_RANGE.min || humidity > HUMIDITY_RANGE.max) {
+                        outOfRangeDetails.push(`${deviceName} - Humidity: ${humidity}% (Range: ${HUMIDITY_RANGE.min}-${HUMIDITY_RANGE.max}%)`);
+                    }
                 }
             }
         }
     });
 
-    // Append the row data to the sheet
+    // Append the data to the sheet
     sheet.appendRow(rowData);
 
-    // Get the index of the last row (which is the row we just appended)
-    var lastRow = sheet.getLastRow();
-
-    // Specify the range to be right-justified (columns B through G in this example)
-    var range = sheet.getRange(lastRow, 2, 1, rowData.length - 1); // Assumes first column is the timestamp
-
-    // Set the horizontal alignment to 'right' for the range
-    range.setHorizontalAlignment("right");
-
-    // Send an email if any data is out of range for devices with "hive" in the name
-    if (outOfRange) {
-        const subject = "Alert: Hive sensor data out of range";
-        const body = `Some hive sensor readings are out of the acceptable range:\n\n` + outOfRangeDetails.join("\n");
-        MailApp.sendEmail(email, subject, body);
+    // Send email alert if any out-of-range values are found
+    if (outOfRangeDetails.length > 0 && emailCount < MAX_EMAIL_ALERTS_PER_DAY) {
+        const subject = 'HiveMonitor Alert: Out-of-Range Values Detected';
+        const body = `Timestamp: ${timestamp}\n\nThe following values are out of range:\n\n${outOfRangeDetails.join('\n')}`;
+        GmailApp.sendEmail(email, subject, body);
+        emailCount++;
     }
+
+    minChart = plotDailyTemperatures("min");  // Plot daily minimums
+    maxChart = plotDailyTemperatures("max");  // Plot daily maximums
 }
 
 function createDailyCharts() {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('SensorsData');
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
     const dataRange = sheet.getDataRange();
     const dataValues = dataRange.getValues();
+    const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
-    const last24HoursData = [];
     const now = new Date();
-    const twentyFourHoursAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000)); // 24 hours ago
-    const reportDate = new Date(now.getTime() - (24 * 60 * 60 * 1000)); // Use date -1 for charts and email
-
+    const twentyFourHoursAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
+    const reportDate = new Date(now.getTime() - (24 * 60 * 60 * 1000)); // Use date -1 for charts
     const formattedDate = Utilities.formatDate(reportDate, Session.getScriptTimeZone(), "dd-MMM-yyyy");
 
-    // Clear previous temp and humidity data columns
-    sheet.getRange('Y:AG').clear(); // Clear columns Y to AG for fresh data
+    // Clear previous charts and data
+    sheet.getCharts().forEach(chart => sheet.removeChart(chart));
 
-    // Extract all rows within the last 24 hours
-    for (let i = 1; i < dataValues.length; i++) {  // Skip header
-        const rowTimestamp = new Date(dataValues[i][0]); // First column is the timestamp
+    // Step 1: Count columns with data and wipe old columns starting from NDATA+1+8
+    const NDATA = headerRow.filter(cell => cell !== "").length; // Count non-empty columns
+    
+    // Step 2: Use column NDATA+8 for graph timestamps
+    const timestampCol = NDATA + 8;
+    sheet.getRange(100, timestampCol, 64, NDATA + 1).clear(); // Wipe old data
+
+    const last24HoursData = [];
+    for (let i = 1; i < dataValues.length; i++) { // Skip header
+        const rowTimestamp = new Date(dataValues[i][0]);
         if (rowTimestamp >= twentyFourHoursAgo && rowTimestamp <= now) {
-            last24HoursData.push(dataValues[i]); // Add the whole row if it's within the last 24 hours
+            last24HoursData.push(dataValues[i]);
         }
     }
-
     if (last24HoursData.length === 0) {
         Logger.log("No data found for the last 24 hours.");
         return;
     }
 
-    // Prepare data for temperature and humidity columns Y to AG
     const tempData = [];
     const humidityData = [];
+    const hiveColumns = [];
+    let outsideSensorColumn = -1;
 
-    last24HoursData.forEach(row => {
-        const time = new Date(row[0]); // Timestamp
-
-        // Extract temperature and humidity from text
-        const [tempLeftHive, humidityLeftHive] = extractTempHumidity(row[1]); // Column B
-        const [tempRightHive, humidityRightHive] = extractTempHumidity(row[2]); // Column C
-        const [tempNucHive, humidityNucHive] = extractTempHumidity(row[3]); // Column D
-        const [tempGarage, humidityGarage] = extractTempHumidity(row[4]); // Column E
-
-        // Push valid temperature data to tempData array
-        tempData.push([time, tempLeftHive, tempRightHive, tempNucHive, tempGarage]);
-        
-        // Push valid humidity data to humidityData array
-        humidityData.push([time, humidityLeftHive, humidityRightHive, humidityNucHive]);
+    // Step 3: Count columns with "hive" in the name
+    headerRow.forEach((name, colIndex) => {
+        const lowerName = name.toLowerCase();
+        if (lowerName.includes("hive")) {
+            hiveColumns.push(colIndex);
+        } else if (name === OUTSIDE_SENSOR) {
+            outsideSensorColumn = colIndex;
+        }
     });
 
-    // Write temperature data to columns Y to AD
-    if (tempData.length > 0) {
-        sheet.getRange(2, 26, tempData.length, tempData[0].length).setValues(tempData); // Y is column 26
+    // Step 4: Process data and populate temperature and humidity data
+    last24HoursData.forEach(row => {
+        const time = row[0];
+        const tempRow = [time];
+        const humidityRow = [time];
+
+        hiveColumns.forEach(colIndex => {
+            const [temp, humidity] = extractTempHumidity(row[colIndex]);
+            tempRow.push(temp);
+            humidityRow.push(humidity);
+        });
+
+        if (outsideSensorColumn !== -1) {
+            const [tempOutside, humidityOutside] = extractTempHumidity(row[outsideSensorColumn]);
+            tempRow.push(tempOutside);
+            if (PLOT_OUTSIDE_HUMIDITY) {
+                humidityRow.push(humidityOutside); // Add humidity data for external sensor if PLOT_OUTSIDE_HUMIDITY is true
+            }
+        }
+
+        tempData.push(tempRow);
+        humidityData.push(humidityRow);
+    });
+
+    // Step 5: Write temperature data to columns starting at NDATA+1+9
+    const tempStartCol = NDATA + 9;
+    const tempRange = sheet.getRange(2, tempStartCol, tempData.length, tempData[0].length);
+    tempRange.setValues(tempData);
+
+    // Convert timestamps to HH:mm format in the temp data range
+    const timestampRange = sheet.getRange(2, tempStartCol, tempData.length, 1); // Get the timestamp column
+    const timestampValues = timestampRange.getValues();
+    for (let i = 0; i < timestampValues.length; i++) {
+        const formattedTimestamp = Utilities.formatDate(timestampValues[i][0], Session.getScriptTimeZone(), "HH:mm");
+        timestampValues[i][0] = formattedTimestamp;
     }
+    timestampRange.setValues(timestampValues); // Update the column with formatted timestamps
 
-    // Write humidity data to columns AE to AG
-    if (humidityData.length > 0) {
-        sheet.getRange(2, 31, humidityData.length, humidityData[0].length).setValues(humidityData); // AE is column 31
-    }
-
-    // Format columns Z and AE as Time and HH:mm
-    sheet.getRange(2, 26, tempData.length, 1).setNumberFormat("HH:mm"); // Column Z
-    sheet.getRange(2, 31, humidityData.length, 1).setNumberFormat("HH:mm"); // Column AE
-
-    // Clear previous charts
-    sheet.getCharts().forEach(chart => sheet.removeChart(chart));
+    // Step 6: Format temperature data columns as numbers
+    sheet.getRange(2, tempStartCol + 1, tempData.length, tempData[0].length - 1).setNumberFormat("0.0");
 
     // Create temperature chart
     const tempChart = sheet.newChart()
         .setChartType(Charts.ChartType.LINE)
-        .addRange(sheet.getRange(2, 26, tempData.length, 5)) // Time + 4 temperature columns (Y to AD)
-        .setPosition(2, 9, 0, 0)  // Positioning the chart to the right of column I (column 9)
+        .addRange(tempRange)
+        .setPosition(2, NDATA+1, 0, 0) // Set position to (2, 9)
         .setOption('title', `Temperature for ${formattedDate}`)
         .setOption('legend', { position: 'right' })
         .setOption('hAxis', {
             title: 'Time',
-            format: 'HH:mm',
-            minorGridlines: { count: 1 },
-            gridlines: { count: 24 },
-            slantedText: true,       // Enable slanted text
-            slantedTextAngle: 90     // Set the angle to 90 degrees
-            //ticks: generateTicks(last24HoursData[0][0], last24HoursData[last24HoursData.length - 1][0], 1) // Set 1-hour ticks
+            format: 'HH:mm', // Ensure that the time format is "HH:mm"
+            gridlines: { count: 6 },
+            ticks: timestampValues.map(row => row[0]), // Use formatted timestamps for ticks
         })
         .setOption('vAxis', {
             title: 'Temperature (°C)',
@@ -190,50 +296,59 @@ function createDailyCharts() {
                 min: Math.floor(Math.min(...tempData.flatMap(row => row.slice(1))) / 10) * 10
             }
         })
-        .setOption('series', {
-            0: { labelInLegend: 'Left hive', lineWidth: 2 },
-            1: { labelInLegend: 'Right hive', lineWidth: 2 },
-            2: { labelInLegend: 'NUC hive', lineWidth: 2 },
-            3: { labelInLegend: 'Garage', lineWidth: 2 }
-        })
-        .setOption('curveType', 'none')  // Ensure it's a line chart with no smoothing
-        .setOption('pointSize', 5) // Add points to make it easier to see
+        .setOption('pointSize', 5) // Add points to the lines
+        .setOption('series', hiveColumns.concat(outsideSensorColumn !== -1 ? [outsideSensorColumn] : []).reduce((series, colIndex, i) => {
+            series[i] = { labelInLegend: headerRow[colIndex] };
+            return series;
+        }, {}))
         .build();
+
+    sheet.insertChart(tempChart);
+
+    // Step 7: Wipe and populate columns for Humidity graph
+    const humidityStartCol = tempStartCol + tempData[0].length; // After temp data columns
+    const humidityRange = sheet.getRange(2, humidityStartCol, humidityData.length, humidityData[0].length);
+    humidityRange.setValues(humidityData);
+
+    // Convert timestamps to HH:mm format for humidity graph
+    const humidityTimestampRange = sheet.getRange(2, humidityStartCol, humidityData.length, 1); // Get the timestamp column
+    const humidityTimestampValues = humidityTimestampRange.getValues();
+    for (let i = 0; i < humidityTimestampValues.length; i++) {
+        const formattedTimestamp = Utilities.formatDate(humidityTimestampValues[i][0], Session.getScriptTimeZone(), "HH:mm");
+        humidityTimestampValues[i][0] = formattedTimestamp;
+    }
+    humidityTimestampRange.setValues(humidityTimestampValues); // Update the column with formatted timestamps
+
+    // Step 8: Format humidity data columns as numbers
+    sheet.getRange(2, humidityStartCol + 1, humidityData.length, humidityData[0].length - 1).setNumberFormat("0.0");
 
     // Create humidity chart
     const humidityChart = sheet.newChart()
-    .setChartType(Charts.ChartType.LINE)
-    .addRange(sheet.getRange(2, 31, humidityData.length, 4)) // Time + 3 humidity columns (AE to AG)
-    .setPosition(20, 9, 0, 0)  // Positioning the chart below the temperature chart to the right of column I
-    .setOption('title', `Humidity for ${formattedDate}`)
-    .setOption('legend', { position: 'right' })
-      .setOption('hAxis', {
-        title: 'Time',
-        format: 'HH:mm',
-        minorGridlines: { count: 1 },
-        gridlines: { count: 24 },
-        slantedText: true,       // Enable slanted text
-        slantedTextAngle: 90     // Set the angle to 90 degrees
-        //ticks: generateTicks(last24HoursData[0][0], last24HoursData[last24HoursData.length - 1][0], 1) // Set 1-hour ticks
-      })
-    .setOption('vAxis', {
-        title: 'Humidity (%)',
-        viewWindow: {
-            max: Math.ceil(Math.max(...humidityData.flatMap(row => row.slice(1))) / 10) * 10,
-            min: Math.floor(Math.min(...humidityData.flatMap(row => row.slice(1))) / 10) * 10
-        }
-    })
-    .setOption('series', {
-        0: { labelInLegend: 'Left hive', lineWidth: 2 },
-        1: { labelInLegend: 'Right hive', lineWidth: 2 },
-        2: { labelInLegend: 'NUC hive', lineWidth: 2 }
-    })
-    .setOption('curveType', 'none')
-    .setOption('pointSize', 5)
-    .build();
+        .setChartType(Charts.ChartType.LINE)
+        .addRange(humidityRange)
+        .setPosition(20, NDATA+1, 0, 0) // Set position to (20, 9)
+        .setOption('title', `Humidity for ${formattedDate}`)
+        .setOption('legend', { position: 'right' })
+        .setOption('hAxis', {
+            title: 'Time',
+            format: 'HH:mm', // Ensure that the time format is "HH:mm"
+            gridlines: { count: 6 },
+            ticks: humidityTimestampValues.map(row => row[0]), // Use formatted timestamps for ticks
+        })
+        .setOption('vAxis', {
+            title: 'Humidity (%)',
+            viewWindow: {
+                max: Math.ceil(Math.max(...humidityData.flatMap(row => row.slice(1))) / 10) * 10,
+                min: Math.floor(Math.min(...humidityData.flatMap(row => row.slice(1))) / 10) * 10
+            }
+        })
+        .setOption('pointSize', 5) // Add points to the lines
+        .setOption('series', hiveColumns.concat(PLOT_OUTSIDE_HUMIDITY ? [outsideSensorColumn] : []).reduce((series, colIndex, i) => {
+            series[i] = { labelInLegend: headerRow[colIndex] };
+            return series;
+        }, {}))
+        .build();
 
-    // Insert the charts into the sheet
-    sheet.insertChart(tempChart);
     sheet.insertChart(humidityChart);
 
     minChart = plotDailyTemperatures("min");  // Plot daily minimums
@@ -258,7 +373,7 @@ function createDailyCharts() {
             maxChartBlob.setName(`MaximumTemperatures.png`),
             minChartBlob.setName(`MinimumTemperatures.png`)
         ]
-    });
+    });    
 }
 
 // Helper function to extract temperature and humidity from text
@@ -266,97 +381,139 @@ function extractTempHumidity(text) {
     const tempMatch = text.match(/(-?\d+(\.\d+)?)(?=C)/);
     const humidityMatch = text.match(/(\d+)(?=%)/);
 
-    const temperature = tempMatch ? parseFloat(tempMatch[0]) : NaN;
-    const humidity = humidityMatch ? parseFloat(humidityMatch[0]) : NaN;
+    const temperature = tempMatch ? parseFloat(tempMatch[0]) : 0; //to process records like "NaNC 80%"
+    const humidity = humidityMatch ? parseFloat(humidityMatch[0]) : 0;
 
     return [temperature, humidity];
 }
 
 function plotDailyTemperatures(statType) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("SensorsData");
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
   const data = sheet.getDataRange().getValues();
+  const headerRow = data[0]; // Header row (first row)
   
-  // Extract date and temperature data (columns 1-5)
-  const tempData = data.slice(1).map(row => [row[0], row[1], row[2], row[3], row[4]]);
-  
-  const tempByDate = {};
+  // Extract relevant columns
+  const timestampCol = 0; // Timestamp is in the first column
+  const hiveColumns = [];
+  let outsideSensorColumn = -1;
 
-  tempData.forEach(row => {
-    const date = new Date(row[0]).toDateString();
-    if (!tempByDate[date]) tempByDate[date] = [];
-    
-    row.slice(1).forEach(entry => {
-      const temp = parseFloat(entry.split("C")[0]);
-      tempByDate[date].push(temp);
-    });
+  headerRow.forEach((header, index) => {
+    if (header.toLowerCase().includes("hive")) {
+      hiveColumns.push(index);
+    } else if (header.includes(OUTSIDE_SENSOR)) {
+      outsideSensorColumn = index;
+    }
   });
-  
-  // Calculate daily minimum or maximum temperatures based on statType
+
+  //console.log(`Stat type: ${statType}`);
+  //console.log(`Hive columns: ${hiveColumns}`);
+  //console.log(`Outside sensor column: ${outsideSensorColumn}`);
+
+  // Prepare data
+  const tempData = data.slice(1).map(row => {
+    const date = new Date(row[timestampCol]);
+    if (isNaN(date)) return null;
+
+    const tempRow = [date];
+    hiveColumns.forEach(colIndex => {
+      const temp = parseFloat(row[colIndex]?.split("C")[0]);
+      tempRow.push(temp);
+    });
+
+    if (outsideSensorColumn !== -1) {
+      const tempOutside = parseFloat(row[outsideSensorColumn]?.split("C")[0]);
+      tempRow.push(tempOutside);
+    }
+
+    return tempRow;
+  }).filter(row => row !== null);
+
+  // Group by date
+  const tempByDate = {};
+  tempData.forEach(row => {
+    const dateStr = row[0].toDateString();
+    if (!tempByDate[dateStr]) tempByDate[dateStr] = [];
+    row.slice(1).forEach(temp => tempByDate[dateStr].push(temp));
+  });
+
   const dailyTempData = Object.keys(tempByDate).map(dateStr => {
     const date = new Date(dateStr);
-    const dailyTemps = [date]; // Store Date object instead of formatted string
-    for (let i = 0; i < 4; i++) {
-      const colTemps = tempByDate[dateStr].filter((_, index) => index % 4 === i);
-      
-      // Correct logic here:
-      // Use Math.min for minimum temperatures and Math.max for maximum temperatures
-      dailyTemps.push(statType === "min" ? Math.min(...colTemps) : Math.max(...colTemps));
-    }
+    const dailyTemps = [date];
+
+    // Group temperatures by columns
+    const columnsData = Array(hiveColumns.length + (outsideSensorColumn !== -1 ? 1 : 0)).fill().map(() => []);
+
+    tempByDate[dateStr].forEach((temp, index) => {
+      // Convert invalid values to 0
+      const numericValue = isNaN(temp) || temp === null ? 0 : temp;
+      columnsData[index % columnsData.length].push(numericValue);
+    });
+
+    // Calculate statType for each column
+    columnsData.forEach(colTemps => {
+      if (colTemps.length > 0) {
+        dailyTemps.push(statType === "min" ? Math.min(...colTemps) : Math.max(...colTemps));
+      } else {
+        dailyTemps.push(0); // No data for this column, use 0 as a default
+      }
+    });
+
+    //console.log(`Date: ${dateStr}, ${statType} temperatures: ${dailyTemps.slice(1)}`);
     return dailyTemps;
   });
 
-  // Only keep the last 31 entries for a monthly view
+  // Format for the last 31 days
   const last31Entries = dailyTempData.slice(-31);
-  
-  // Extract dates and temperatures for the last 31 entries
-  const dates = last31Entries.map(row => [row[0]]); // Date objects
+  const dates = last31Entries.map(row => [row[0]]);
   const temperatures = last31Entries.map(row => row.slice(1));
-  
-  // Define destination columns based on statType
-  const dateCol = statType === "min" ? 20 : 20;  // Dates in column T
-  const tempStartCol = statType === "min" ? 21 : 16; // Min in U-Y, Max in P-S
-  
-  // Save dates and temperatures to appropriate columns
-  const dateRange = sheet.getRange(2, dateCol, dates.length, 1);
+
+  if (dates.length === 0 || temperatures.length === 0) {
+    console.log("No data to write or plot.");
+    return;
+  }
+
+  // Write to sheet
+  const NDATA = headerRow.filter(cell => cell !== "").length; // Count non-empty columns
+  const rowStart = statType === "min" ? 100 : 132; // Minimums at row 100, maximums at row 132
+  const colStart = NDATA+9; // Start with a column safely after sensors data
+  const dateCol = colStart; // Column for dates
+  const tempStartCol = colStart + 1; // Column for temperatures
+
+  const dateRange = sheet.getRange(rowStart, dateCol, dates.length, 1);
   dateRange.setValues(dates);
-  dateRange.setNumberFormat("dd-MMM-yy"); // Set desired date format
+  dateRange.setNumberFormat("dd-MMM-yy");
+
+  const tempRange = sheet.getRange(rowStart, tempStartCol, temperatures.length, temperatures[0].length);
+  tempRange.setValues(temperatures);
+  tempRange.setNumberFormat("0.0");
+
+  // Create chart
   
-  const tempRange = sheet.getRange(2, tempStartCol, temperatures.length, 4);
-  tempRange.setValues(temperatures); // Temperatures in columns P-S or U-Y
-  
-  // Configure chart settings
   const title = statType === "min" ? "Daily Minimum Temperatures" : "Daily Maximum Temperatures";
-  const position = statType === "min" ? [20, 15, 0, 0] : [2, 15, 0, 0]; // Position for min or max chart
-  
+  const chartPosition = statType === "min" ? [20, NDATA+6, 0, 0] : [2, NDATA+6, 0, 0];
+
   const chart = sheet.newChart()
-      .setChartType(Charts.ChartType.LINE)
-      .addRange(sheet.getRange(2, dateCol, dates.length, 1))       // X-axis from column T
-      .addRange(sheet.getRange(2, tempStartCol, temperatures.length, 4)) // Y-axis from columns P-S or U-Y
-      .setPosition(...position)
-      .setOption('title', title)
-      .setOption('hAxis', {
-          title: 'Date',
-          slantedText: true,
-          slantedTextAngle: 90,
-          format: 'dd-MMM-yy', // Correct format for display
-          gridlines: {
-              count: last31Entries.length   // One gridline per day
-          }
-      })
-      .setOption('vAxis', {
-          title: 'Temperature (°C)',
-          gridlines: { count: -1 },
-          minorGridlines: { count: 1 }
-      })
-      .setOption('legend', { position: 'none' })
-      .setOption('series', {
-          0: { pointSize: 5 },
-          1: { pointSize: 5 },
-          2: { pointSize: 5 },
-          3: { pointSize: 5 }
-      })
-      .build();
-  
+    .setChartType(Charts.ChartType.LINE)
+    .addRange(sheet.getRange(rowStart, dateCol, dates.length, 1)) // X-axis
+    .addRange(sheet.getRange(rowStart, tempStartCol, temperatures.length, temperatures[0].length)) // Y-axis
+    .setPosition(...chartPosition)
+    .setOption('title', title)
+    .setOption('hAxis', {
+      title: 'Date',
+      slantedText: true,
+      slantedTextAngle: 90,
+      format: 'dd-MMM-yy',
+      gridlines: { count: last31Entries.length }
+    })
+    .setOption('vAxis', {
+      title: 'Temperature (°C)',
+      gridlines: { count: -1 },
+      minorGridlines: { count: 1 }
+    })
+    .setOption('legend', { position: 'none' })
+    .setOption('pointSize', 5)
+    .build();
+
   sheet.insertChart(chart);
   return(chart);
 }
