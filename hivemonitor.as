@@ -182,9 +182,6 @@ function logSensorData() {
         GmailApp.sendEmail(email, subject, body);
         emailCount++;
     }
-
-    minChart = plotDailyTemperatures("min");  // Plot daily minimums
-    maxChart = plotDailyTemperatures("max");  // Plot daily maximums
 }
 
 function createDailyCharts() {
