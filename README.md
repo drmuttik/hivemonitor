@@ -8,8 +8,8 @@ Introduction is in ["hivemonitor.pdf"](hivemonitor.pdf) - it describes the compo
 (with Amazon links valid in Nov 2024) and how sensors can be fitted into a hive. 
 
 It is possible to run the system without a hub by directly receiving Bluetooth data on your smartphone. It works but, apart from not being able to automate
-the system, you would lose an ability to monitor the hives' when you are not in the vicinity. I found that a statonary hub located closer to the hives is 
-pretty useful even before automation is added.
+the system, you would lose an ability to monitor the hives' when you are not in the vicinity. I found that a statonary hub located closer to the hives 
+(inside your house, of course; in my case it is near the window looking onto the hives, about 30m from them) is pretty useful even before automation is added.
 
 ### Steps listed in the ["hivemonitor.pdf"](hivemonitor.pdf) include:
   - procuring sensors and a "mini-hub" (directly from switch-bot.com or via Amazon)
@@ -46,7 +46,7 @@ When you set it up so that the app shows and updates the graphs you will be able
     (If any error occurs it will be reported at the bottom.)</ins>
     <br><ins>**Note**: Sending Emails from a script is considered an unsafe operation (due to spam risks) - you will need to explicitly allow it when Google Sheets ask.</ins>
 
-If you need help, find any bug, have any comments or ideas, please Email me - you can find the address at the bottom of ["hivemonitor.pdf"](hivemonitor.pdf).
+If you need help, find any bugs, have any comments or ideas, please Email me - you can find the address at the top of ["hivemonitor.pdf"](hivemonitor.pdf).
 
 <div style="display: flex; flex-wrap: wrap; justify-content: space-between;">
   <img src="sensor-frame-back.jpeg" alt="Sensor frame (back)" width="300px" height="400px">
