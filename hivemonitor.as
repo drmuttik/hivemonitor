@@ -127,7 +127,7 @@ function logSensorData() {
 
             // Collect temperature and humidity
             deviceData[deviceId] = {
-                temperature: statusData.temperature || N/A, 
+                temperature: statusData.temperature || 'N/A', 
                 humidity: statusData.humidity || 'N/A'
             };
         }
