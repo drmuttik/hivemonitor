@@ -5,13 +5,13 @@ const token = 'your token here';
 const email = 'your gmail here';
 
 // Define acceptable ranges
-const TEMP_RANGE = { min: 10, max: 32 }; //side frame with the sensor is well ouside of the bees' cluster so can be pretty cool
+const TEMP_RANGE = { min: 9, max: 32 }; //side frame with the sensor is well ouside of the bees' cluster so can be pretty cool
 const HUMIDITY_RANGE = { min: 50, max: 75 };
 
 // Define one sensor measuring temperature outside (name)
-const OUTSIDE_SENSOR="Porch";
+const OUTSIDE_SENSOR="Garage";
 
-// Set to true to include the outside humidity in the humidity chart (to exclude - set to false)
+// Set to true to include the outside humidity in the humidity chart
 const PLOT_OUTSIDE_HUMIDITY = true;
 
 // Maximum number of email alerts per day
@@ -144,8 +144,8 @@ function logSensorData() {
         const columnIndex = deviceIdMap[deviceId];
         if (columnIndex !== undefined) {
             const data = deviceData[deviceId];
-            const temperature = parseFloat(data.temperature);
-            const humidity = parseFloat(data.humidity);
+            let temperature = parseFloat(data.temperature);
+            let humidity = parseFloat(data.humidity);
             // Replace NaN with default values
             if (isNaN(temperature)) temperature = 0;
             if (isNaN(humidity)) humidity = 0;
@@ -487,7 +487,7 @@ function plotDailyTemperatures(statType) {
   // Create chart
   
   const title = statType === "min" ? "Daily Minimum Temperatures" : "Daily Maximum Temperatures";
-  const chartPosition = statType === "min" ? [20, NDATA+6, 0, 0] : [2, NDATA+6, 0, 0];
+  const chartPosition = statType === "min" ? [20, NDATA+7, 0, 0] : [2, NDATA+7, 0, 0];
 
   const chart = sheet.newChart()
     .setChartType(Charts.ChartType.LINE)
