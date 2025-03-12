@@ -23,7 +23,7 @@ const MAX_EMAIL_ALERTS_PER_DAY = 5;
 let emailCount = 0;
 let lastEmailResetDate = '';
 
-function logSensorData() {
+function logSensorData(){
   const url = 'https://api.switch-bot.com/v1.0/devices';
   const headers = {
     "Authorization": token,
@@ -47,31 +47,38 @@ function logSensorData() {
     }
   }
 
-    const deviceList = JSON.parse(response.getContentText()).body.deviceList;
+  const deviceList = JSON.parse(response.getContentText()).body.deviceList;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
 
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
-
-    // Reset email count at midnight
-    const todayDate = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-    if (lastEmailResetDate !== todayDate) {
-        emailCount = 0;
-        lastEmailResetDate = todayDate;
-    }
+  // Reset email count at midnight
+  const todayDate = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  if (lastEmailResetDate !== todayDate) {
+      emailCount = 0;
+      lastEmailResetDate = todayDate;
+  }
 
     // Prepare header row, excluding "Hub Mini" devices
-    const headerRow = ["Timestamp"];
+    //const headerRow = ["Timestamp"];
     const deviceIdMap = {}; // Map to track device IDs for correct column placement
 
-    const filteredDeviceList = deviceList.filter(device => {
+        const filteredDeviceList = deviceList.filter(device => {
         const deviceName = device.deviceName || '';
         if (deviceName.trim() !== '' && !deviceName.toLowerCase().includes("hub mini")) {
-            headerRow.push(device.deviceName);
-            deviceIdMap[device.deviceId] = headerRow.length - 1; // Map device ID to column index
             return true;
         }
         return false;
     });
 
+    var headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    while (headerRow.length > 0 && headerRow[headerRow.length - 1] === "") {  //remove empty strings at the end
+        headerRow.pop();
+    }
+
+    //console.log('filteredDeviceList');
+    //console.log(filteredDeviceList);
+    //console.log('headerRow');
+    //console.log(headerRow);
+        
     //check if there is at least one device with "hive" in the name (commented out to allow people not assigning any names)
     //const hasHive = filteredDeviceList.some(device => device.deviceName.toLowerCase().includes("hive"));
     //if (!hasHive) {
@@ -99,19 +106,42 @@ function logSensorData() {
         }
       }
 
-      // Paint header row yellow and assign comments
+      // Paint header row yellow
       const headerRange = sheet.getRange(1, 1, 1, headerRow.length);
       headerRange.setValues([headerRow])
           .setFontWeight('bold')
           .setFontSize(headerRange.getFontSize() + 1)
           .setBackground('yellow');
-
-      // Add device IDs as comments in the header row
-      Object.keys(deviceIdMap).forEach(deviceId => {
-        const columnIndex = deviceIdMap[deviceId] + 1;
-        sheet.getRange(1, columnIndex).setComment(`Device ID: ${deviceId}`);
-      });
     }
+    
+    // Read existing comments in header row to restore device ID mapping
+    const headerRange = sheet.getRange(1, 1, 1, sheet.getLastColumn());
+    const comments = headerRange.getComments()[0];
+    for (let col = 1; col < comments.length; col++) {
+        const match = comments[col]?.match(/Device ID: (.+)/);
+        if (match) {
+            deviceIdMap[match[1]] = col; // Store device ID to column index mapping
+        }
+    }
+
+    //console.log('DeviceIdMap');
+    //console.log(deviceIdMap);
+
+    // Build a map of real device names (assigned in the app) from filteredDeviceList
+    const realDeviceNames = new Set(filteredDeviceList.map(device => device.deviceName.trim()));
+
+    //console.log('realDeviceNames');
+    //console.log([...realDeviceNames]);  // Convert Set to Array and log
+
+    // Add Device ID as a comment only if the column name matches an actual device name (to allow replacing broken devices under the same name)
+    Object.keys(deviceIdMap).forEach(deviceId => {
+        const columnIndex = deviceIdMap[deviceId]; // 1-based index
+        const deviceName = headerRow[columnIndex]; // Name in the header
+
+        if (realDeviceNames.has(deviceName.trim())) {
+            sheet.getRange(1, columnIndex+1 ).setComment(`Device ID: ${deviceId}`); //+1 to skip Timestamp
+        }
+    });
 
     // Prepare to log data
     const deviceData = {};
@@ -153,11 +183,16 @@ function logSensorData() {
 
             // Check for out-of-range values only for devices with "hive" in the name
             const deviceName = headerRow[columnIndex];
+            /* console.log(`DeviceName: ${deviceName}`);
+            console.log(`DeviceId: ${deviceId}`);
+            console.log(`columnIndex: ${columnIndex}`);
+            console.log(`temperature: ${temperature}`);
+            console.log(`---`); */
             if (deviceName.toLowerCase().includes("hive")) {
                 if ((temperature < TEMP_RANGE.min || temperature > TEMP_RANGE.max) || 
                     (humidity < HUMIDITY_RANGE.min || humidity > HUMIDITY_RANGE.max)) {
                     // Highlight the cell
-                    const cell = sheet.getRange(sheet.getLastRow() + 1, columnIndex + 1); // Next row, respective column
+                    const cell = sheet.getRange(sheet.getLastRow() + 1, columnIndex );
                     cell.setBackground('pink');
 
                     // Add details to the out-of-range list
@@ -172,6 +207,9 @@ function logSensorData() {
         }
     });
 
+//console.log("rowData");
+//console.log(rowData);
+
     // Append the data to the sheet
     sheet.appendRow(rowData);
 
@@ -182,7 +220,9 @@ function logSensorData() {
         GmailApp.sendEmail(email, subject, body);
         emailCount++;
     }
+
 }
+
 
 function createDailyCharts() {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
