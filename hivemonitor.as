@@ -5,7 +5,7 @@ const token = 'your token here';
 const email = 'your gmail here';
 
 // Define acceptable ranges
-const TEMP_RANGE = { min: 9, max: 32 }; //side frame with the sensor is well ouside of the bees' cluster so can be pretty cool
+const TEMP_RANGE = { min: 9, max: 35 }; //side frame with the sensor is well ouside of the bees' cluster so can be pretty cool
 const HUMIDITY_RANGE = { min: 50, max: 75 };
 
 // Define one sensor measuring temperature outside (name)
@@ -192,7 +192,7 @@ function logSensorData(){
                 if ((temperature < TEMP_RANGE.min || temperature > TEMP_RANGE.max) || 
                     (humidity < HUMIDITY_RANGE.min || humidity > HUMIDITY_RANGE.max)) {
                     // Highlight the cell
-                    const cell = sheet.getRange(sheet.getLastRow() + 1, columnIndex );
+                    const cell = sheet.getRange(sheet.getLastRow() + 1, columnIndex + 1 );
                     cell.setBackground('pink');
 
                     // Add details to the out-of-range list
