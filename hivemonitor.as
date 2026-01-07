@@ -5,8 +5,8 @@ const token = 'your token here';
 const email = 'your gmail here';
 
 // Define acceptable ranges
-const TEMP_RANGE = { min: 9, max: 35 }; //side frame with the sensor is well ouside of the bees' cluster so can be pretty cool
-const HUMIDITY_RANGE = { min: 50, max: 75 };
+const TEMP_RANGE = { min: 9, max: 34 }; //side frame with the sensor is well ouside of the bees' cluster so can be pretty cool
+const HUMIDITY_RANGE = { min: 45, max: 75 };
 
 // Define one sensor measuring temperature outside (name)
 const OUTSIDE_SENSOR="Garage";
@@ -14,16 +14,80 @@ const OUTSIDE_SENSOR="Garage";
 // Set to true to include the outside humidity in the humidity chart
 const PLOT_OUTSIDE_HUMIDITY = true;
 
-// Maximum number of email alerts per day
-const MAX_EMAIL_ALERTS_PER_DAY = 5;
+// Maximum number of email alerts per day (you can also reduce the number of emails by changing the acceptable temperature/humidity ranges above)
+const MAX_EMAIL_ALERTS_PER_DAY = 24;  //note that if the script runs once per hour (set in triggers of apps script) then only values <24 would have effect
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
-// Global variable to track email count and date
-let emailCount = 0;
-let lastEmailResetDate = '';
+// Function to get/set alert state in script properties
+function getAlertState() {
+  const props = PropertiesService.getScriptProperties();
+  const state = props.getProperty('alertState');
+  return state ? JSON.parse(state) : {};
+}
 
-function logSensorData(){
+function setAlertState(state) {
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty('alertState', JSON.stringify(state));
+}
+
+// Function to get/set email count and date
+function getEmailCount() {
+  const props = PropertiesService.getScriptProperties();
+  const todayDate = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const lastEmailResetDate = props.getProperty('lastEmailResetDate');
+  
+  // Reset count if it's a new day
+  if (lastEmailResetDate !== todayDate) {
+    props.setProperty('emailCount', '0');
+    props.setProperty('lastEmailResetDate', todayDate);
+    return 0;
+  }
+  
+  const count = props.getProperty('emailCount');
+  return count ? parseInt(count) : 0;
+}
+
+function incrementEmailCount() {
+  const props = PropertiesService.getScriptProperties();
+  const currentCount = getEmailCount();
+  props.setProperty('emailCount', String(currentCount + 1));
+}
+
+// Helper function to parse previous row data
+function getPreviousValues(sheet, deviceIdMap, headerRow) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return {}; // No previous data
+  
+  const previousRowData = sheet
+    .getRange(lastRow, 1, 1, headerRow.length)
+    .getValues()[0];
+  const previousValues = {};
+  
+  Object.keys(deviceIdMap).forEach(deviceId => {
+    const columnIndex = deviceIdMap[deviceId];
+    if (columnIndex !== undefined && previousRowData[columnIndex]) {
+      const cellValue = previousRowData[columnIndex].toString();
+      // Allow optional minus for temperature, keep humidity non‑negative
+      const match = cellValue.match(/(-?[\d.]+)C\s+([\d]+)%/);
+      if (match) {
+        const deviceName = headerRow[columnIndex];
+        previousValues[deviceName] = {
+          temperature: parseFloat(match[1]),
+          humidity: parseInt(match[2], 10)
+        };
+      }
+    }
+  });
+  
+  return previousValues;
+}
+
+
+function logSensorData(e){
+  // Check if running manually (no event object passed from trigger)
+  const isManualRun = (typeof e === 'undefined' || e === null);
+  
   const url = 'https://api.switch-bot.com/v1.0/devices';
   const headers = {
     "Authorization": token,
@@ -50,12 +114,8 @@ function logSensorData(){
   const deviceList = JSON.parse(response.getContentText()).body.deviceList;
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
 
-  // Reset email count at midnight
-  const todayDate = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  if (lastEmailResetDate !== todayDate) {
-      emailCount = 0;
-      lastEmailResetDate = todayDate;
-  }
+  // Get current email count (automatically resets at midnight)
+  const emailCount = getEmailCount();
 
     // Prepare header row, excluding "Hub Mini" devices
     //const headerRow = ["Timestamp"];
@@ -143,6 +203,9 @@ function logSensorData(){
         }
     });
 
+    // Get previous values before logging new data
+    const previousValues = getPreviousValues(sheet, deviceIdMap, headerRow);
+
     // Prepare to log data
     const deviceData = {};
     filteredDeviceList.forEach(device => {
@@ -168,7 +231,13 @@ function logSensorData(){
     let rowData = Array(headerRow.length).fill(''); // Initialize row with empty values
     rowData[0] = timestamp; // Set timestamp in column A
 
-    let outOfRangeDetails = []; // Store details for out-of-range alerts
+    // Get previous alert state
+    const previousAlertState = getAlertState();
+    const currentAlertState = {};
+    
+    let outOfRangeDetails = []; // Store details for out-of-range alerts with previous values
+    let returnedToNormalDetails = []; // Store details for sensors that returned to normal
+    let hasStateChanges = false; // Track if any state actually changed
 
     Object.keys(deviceData).forEach(deviceId => {
         const columnIndex = deviceIdMap[deviceId];
@@ -189,23 +258,75 @@ function logSensorData(){
             console.log(`temperature: ${temperature}`);
             console.log(`---`); */
             if (deviceName.toLowerCase().includes("hive")) {
-                if ((temperature < TEMP_RANGE.min || temperature > TEMP_RANGE.max) || 
-                    (humidity < HUMIDITY_RANGE.min || humidity > HUMIDITY_RANGE.max)) {
+                const tempOutOfRange = temperature < TEMP_RANGE.min || temperature > TEMP_RANGE.max;
+                const humidityOutOfRange = humidity < HUMIDITY_RANGE.min || humidity > HUMIDITY_RANGE.max;
+                const isOutOfRange = tempOutOfRange || humidityOutOfRange;
+                
+                // Store current state
+                currentAlertState[deviceName] = {
+                    tempOutOfRange: tempOutOfRange,
+                    humidityOutOfRange: humidityOutOfRange,
+                    temperature: temperature,
+                    humidity: humidity
+                };
+                
+                // Check if state has changed
+                const previousState = previousAlertState[deviceName];
+                const tempValueChanged = !previousState || previousState.temperature !== temperature;
+                const humidityValueChanged = !previousState || previousState.humidity !== humidity;
+                const tempStateChanged = !previousState || previousState.tempOutOfRange !== tempOutOfRange;
+                const humidityStateChanged = !previousState || previousState.humidityOutOfRange !== humidityOutOfRange;
+                
+                // Get previous reading values from sheet
+                const prevValues = previousValues[deviceName];
+                
+                if (isOutOfRange) {
                     // Highlight the cell
-                    const cell = sheet.getRange(sheet.getLastRow() + 1, columnIndex + 1 );
+                    const cell = sheet.getRange(sheet.getLastRow() + 1, columnIndex+1);
                     cell.setBackground('pink');
 
-                    // Add details to the out-of-range list
-                    if (temperature < TEMP_RANGE.min || temperature > TEMP_RANGE.max) {
-                        outOfRangeDetails.push(`${deviceName} - Temperature: ${temperature.toFixed(1)}C (Range: ${TEMP_RANGE.min}-${TEMP_RANGE.max}C)`);
+                    // Always collect ALL out-of-range values for complete status
+                    if (tempOutOfRange) {
+                        if (prevValues) {
+                            outOfRangeDetails.push(`${deviceName} - Temperature: ${temperature.toFixed(1)}C (was: ${prevValues.temperature.toFixed(1)}C)`);
+                        } else {
+                            outOfRangeDetails.push(`${deviceName} - Temperature: ${temperature.toFixed(1)}C`);
+                        }
                     }
-                    if (humidity < HUMIDITY_RANGE.min || humidity > HUMIDITY_RANGE.max) {
-                        outOfRangeDetails.push(`${deviceName} - Humidity: ${humidity}% (Range: ${HUMIDITY_RANGE.min}-${HUMIDITY_RANGE.max}%)`);
+                    if (humidityOutOfRange) {
+                        if (prevValues) {
+                            outOfRangeDetails.push(`${deviceName} - Humidity: ${humidity}% (was: ${prevValues.humidity}%)`);
+                        } else {
+                            outOfRangeDetails.push(`${deviceName} - Humidity: ${humidity}%`);
+                        }
                     }
+
+                    // Track if this is a NEW alert or changed value (for triggering email)
+                    if (tempOutOfRange && (isManualRun || tempStateChanged || tempValueChanged)) {
+                        hasStateChanges = true;
+                    }
+                    if (humidityOutOfRange && (isManualRun || humidityStateChanged || humidityValueChanged)) {
+                        hasStateChanges = true;
+                    }
+                }
+                
+                // Check if temperature returned to normal
+                if (!tempOutOfRange && tempStateChanged && previousState && previousState.tempOutOfRange) {
+                    returnedToNormalDetails.push(`${deviceName} - Temperature: ${temperature.toFixed(1)}C (Back to normal)`);
+                    hasStateChanges = true;
+                }
+                
+                // Check if humidity returned to normal
+                if (!humidityOutOfRange && humidityStateChanged && previousState && previousState.humidityOutOfRange) {
+                    returnedToNormalDetails.push(`${deviceName} - Humidity: ${humidity}% (Back to normal)`);
+                    hasStateChanges = true;
                 }
             }
         }
     });
+
+    // Update alert state
+    setAlertState(currentAlertState);
 
 //console.log("rowData");
 //console.log(rowData);
@@ -213,16 +334,40 @@ function logSensorData(){
     // Append the data to the sheet
     sheet.appendRow(rowData);
 
-    // Send email alert if any out-of-range values are found
-    if (outOfRangeDetails.length > 0 && emailCount < MAX_EMAIL_ALERTS_PER_DAY) {
-        const subject = 'HiveMonitor Alert: Out-of-Range Values Detected';
-        const body = `Timestamp: ${timestamp}\n\nThe following values are out of range:\n\n${outOfRangeDetails.join('\n')}`;
-        GmailApp.sendEmail(email, subject, body);
-        emailCount++;
+    // Send email alert if there are changes in alert status
+    if (hasStateChanges && (isManualRun || emailCount < MAX_EMAIL_ALERTS_PER_DAY)) {
+        let subject = 'HiveMonitor Alert: ';
+        let bodyParts = [`<b>Timestamp:</b> ${timestamp}<br>`];
+        
+        if (isManualRun) {
+            bodyParts.push(`<b>[MANUAL RUN]</b><br>`);
+        }
+        
+        if (outOfRangeDetails.length > 0) {
+            subject += 'Out-of-Range Values Detected';
+            bodyParts.push(`<br><b>Values out of range (T=${TEMP_RANGE.min}-${TEMP_RANGE.max}C, RH=${HUMIDITY_RANGE.min}-${HUMIDITY_RANGE.max}%):</b><br>${outOfRangeDetails.join('<br>')}`);
+        }
+        
+        if (returnedToNormalDetails.length > 0) {
+            if (outOfRangeDetails.length > 0) {
+                subject += ' and Values Returned to Normal';
+            } else {
+                subject += 'Values Returned to Normal';
+            }
+            bodyParts.push(`<br><br><b>The following sensors RETURNED TO NORMAL:</b><br>${returnedToNormalDetails.join('<br>')}`);
+        }
+        
+        const htmlBody = bodyParts.join('');
+        GmailApp.sendEmail(email, subject, '', {
+            htmlBody: htmlBody
+        });
+        
+        // Only increment email count if this was an automated run
+        if (!isManualRun) {
+            incrementEmailCount();
+        }
     }
-
 }
-
 
 function createDailyCharts() {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
@@ -554,3 +699,5 @@ function plotDailyTemperatures(statType) {
   sheet.insertChart(chart);
   return(chart);
 }
+
+
